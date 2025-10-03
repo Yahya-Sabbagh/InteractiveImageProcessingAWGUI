@@ -1,0 +1,261 @@
+
+
+
+import tkinter as tk
+from tkinter import filedialog, Toplevel, messagebox, simpledialog
+from tkinter import ttk
+import cv2
+from PIL import Image, ImageTk
+import threading
+from skimage import filters
+import numpy as np
+
+
+
+class ImageProcessingApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Image Processing App")
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight()
+        self.root.geometry(f"{screen_width // 2}x{screen_height // 2}")
+
+        self.history = []
+        self.redo_stack = []
+        self.current_image = None
+        self.setup_gui()
+
+    def setup_gui(self):
+        menubar = tk.Menu(self.root)
+        self.root.config(menu=menubar)
+
+        file_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="File", menu=file_menu)
+        file_menu.add_command(label="Open", command=self.open_image)
+
+        self.algo_menu = tk.Menu(menubar, tearoff=0)
+        menubar.add_cascade(label="Algorithms", menu=self.algo_menu)
+        self.update_algorithm_menu()
+
+        button_frame = tk.Frame(self.root)
+        button_frame.pack(pady=10)
+
+        self.undo_button = tk.Button(button_frame, text="Undo", command=self.undo)
+        self.undo_button.pack(side=tk.LEFT, padx=5)
+
+        self.redo_button = tk.Button(button_frame, text="Redo", command=self.redo)
+        self.redo_button.pack(side=tk.LEFT, padx=5)
+
+        self.threading_button = tk.Button(button_frame, text="Select Algorithm", command=self.select_algorithm)
+        self.threading_button.pack(side=tk.LEFT, padx=5)
+
+        self.save_button = tk.Button(button_frame, text="Save", command=self.save_image)
+        self.save_button.pack(side=tk.LEFT, padx=5)
+        self.save_button.config(state=tk.DISABLED)
+
+        self.progress = ttk.Progressbar(self.root, length=200, mode='determinate')
+        self.progress.pack(pady=10)
+
+        self.percentage_label = tk.Label(self.root, text="")
+        self.percentage_label.pack()
+
+        self.image_label = tk.Label(self.root)
+        self.image_label.pack(fill=tk.BOTH, expand=True)
+
+        self.disable_buttons()
+
+    def disable_buttons(self):
+        self.undo_button.config(state=tk.DISABLED)
+        self.redo_button.config(state=tk.DISABLED)
+        self.threading_button.config(state=tk.DISABLED)
+        self.save_button.config(state=tk.DISABLED)
+        self.update_algorithm_menu()
+
+    def enable_buttons(self):
+        self.undo_button.config(state=tk.NORMAL)
+        self.redo_button.config(state=tk.NORMAL)
+        self.threading_button.config(state=tk.NORMAL)
+        self.save_button.config(state=tk.NORMAL)
+        self.update_algorithm_menu()
+
+    def update_algorithm_menu(self):
+        self.algo_menu.delete(0, tk.END)
+
+        if self.current_image is None:
+            self.algo_menu.add_command(label="Gaussian Blur", command=self.gaussian_blur_window, state=tk.DISABLED)
+            self.algo_menu.add_command(label="Sobel Edge Detection", command=self.sobel_edge_detection,
+                                       state=tk.DISABLED)
+            self.algo_menu.add_command(label="Invert Colors", command=self.invert_colors, state=tk.DISABLED)
+            self.algo_menu.add_command(label="Histogram Equalization", command=self.histogram_equalization,
+                                       state=tk.DISABLED)
+            self.algo_menu.add_command(label="Sharpen", command=self.sharpen_image, state=tk.DISABLED)
+            self.algo_menu.add_command(label="Drawing Effect", command=self.drawing_effect, state=tk.DISABLED)
+        else:
+            self.algo_menu.add_command(label="Gaussian Blur", command=self.gaussian_blur_window)
+            self.algo_menu.add_command(label="Sobel Edge Detection", command=self.sobel_edge_detection)
+            self.algo_menu.add_command(label="Invert Colors", command=self.invert_colors)
+            self.algo_menu.add_command(label="Histogram Equalization", command=self.histogram_equalization)
+            self.algo_menu.add_command(label="Sharpen", command=self.sharpen_image)
+            self.algo_menu.add_command(label="Drawing Effect", command=self.drawing_effect)
+
+    def save_history(self):
+        if self.current_image is not None:
+            if len(self.history) >= 10:
+                self.history.pop(0)
+            self.history.append(self.current_image.copy())
+            self.redo_stack.clear()
+
+    def open_image(self):
+        file_path = filedialog.askopenfilename(filetypes=[("Image Files", "*.png;*.jpg")])
+        if file_path:
+            image = cv2.imread(file_path)
+            self.current_image = image
+            self.save_history()
+            self.display_image(image)
+            self.enable_buttons()
+            self.save_button.config(state=tk.NORMAL)
+
+    def save_image(self):
+        file_path = filedialog.asksaveasfilename(defaultextension=".jpg", filetypes=[("Image Files", "*.png;*.jpg")])
+        if file_path:
+            cv2.imwrite(file_path, self.history[-1])
+
+    def display_image(self, image):
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(image_rgb)
+        img_pil = img_pil.resize((self.root.winfo_width(), self.root.winfo_height()), Image.ANTIALIAS)
+        img_tk = ImageTk.PhotoImage(img_pil)
+        self.image_label.config(image=img_tk)
+        self.image_label.image = img_tk
+
+    def apply_filter(self, filter_function):
+        if self.current_image is not None:
+            processed_image = filter_function(self.current_image)
+            self.save_history()
+            self.current_image = processed_image
+            self.display_image(processed_image)
+
+    def drawing_effect(self):
+        def process_drawing():
+            gray = cv2.cvtColor(self.current_image, cv2.COLOR_BGR2GRAY)
+            gray = cv2.medianBlur(gray, 7)
+            edges = cv2.adaptiveThreshold(gray, 255,
+                                          cv2.ADAPTIVE_THRESH_MEAN_C,
+                                          cv2.THRESH_BINARY, 9, 10)
+            color = cv2.bilateralFilter(self.current_image, 9, 300, 300)
+            drawing_image = cv2.bitwise_and(color, color, mask=edges)
+
+            self.save_history()
+            self.current_image = drawing_image
+            self.display_image(drawing_image)
+
+        threading.Thread(target=process_drawing).start()
+
+    def undo(self):
+        if len(self.history) > 1:
+            self.redo_stack.append(self.history.pop())
+            self.current_image = self.history[-1]
+            self.display_image(self.current_image)
+
+    def redo(self):
+        if self.redo_stack:
+            self.current_image = self.redo_stack.pop()
+            self.history.append(self.current_image)
+            self.display_image(self.current_image)
+
+    def gaussian_blur_window(self):
+        window = Toplevel(self.root)
+        window.title("Gaussian Blur Parameters")
+
+        tk.Label(window, text="Kernel Size (odd number > 1):").pack()
+        kernel_entry = tk.Entry(window)
+        kernel_entry.pack()
+
+        tk.Button(window, text="Apply", command=lambda: self.apply_gaussian_blur(kernel_entry.get())).pack()
+
+    def apply_gaussian_blur(self, kernel_size):
+        try:
+            kernel_size = int(kernel_size)
+            if kernel_size <= 1 or kernel_size % 2 == 0:
+                messagebox.showerror("Error", "Kernel size must be an odd number greater than 1.")
+                return
+
+            def blur(image):
+                return cv2.GaussianBlur(image, (kernel_size, kernel_size), 0)
+
+            self.apply_filter(blur)
+        except ValueError:
+            messagebox.showerror("Error", "Invalid input. Please enter a valid integer.")
+
+    def sobel_edge_detection(self):
+        def sobel_operation():
+            gray = cv2.cvtColor(self.current_image, cv2.COLOR_BGR2GRAY)
+            edges = filters.sobel(gray)
+            edges = (edges * 255).astype('uint8')
+            sobel_image = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+            self.save_history()
+            self.current_image = sobel_image
+            self.display_image(sobel_image)
+
+        threading.Thread(target=sobel_operation).start()
+
+    def invert_colors(self):
+        def invert(image):
+            return 255 - image
+
+        self.apply_filter(invert)
+
+    def histogram_equalization(self):
+        def hist_equalization():
+            img_yuv = cv2.cvtColor(self.current_image, cv2.COLOR_BGR2YUV)
+            img_yuv[:, :, 0] = cv2.equalizeHist(img_yuv[:, :, 0])
+            hist_image = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
+            self.save_history()
+            self.current_image = hist_image
+            self.display_image(hist_image)
+
+        threading.Thread(target=hist_equalization).start()
+
+    def sharpen_image(self):
+        def sharpen_operation():
+            kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
+            sharpened_image = cv2.filter2D(self.current_image, -1, kernel)
+            self.save_history()
+            self.current_image = sharpened_image
+            self.display_image(sharpened_image)
+
+        threading.Thread(target=sharpen_operation).start()
+
+    def select_algorithm(self):
+        if self.current_image is not None:
+            algorithm_number = simpledialog.askstring("Select Algorithm",
+                                                      "Choose algorithm:\n1. Gaussian Blur\n2. Sobel Edge Detection\n3. Invert Colors\n4. Histogram Equalization\n5. Sharpen\n6. Drawing Effect")
+
+            try:
+                if algorithm_number is None or not algorithm_number.isdigit() or int(algorithm_number) not in range(1,
+                                                                                                                    7):
+                    messagebox.showerror("Error", "Please enter a valid number between 1 and 6.")
+                    return
+
+                algorithm_number = int(algorithm_number)
+                if algorithm_number == 1:
+                    self.gaussian_blur_window()
+                elif algorithm_number == 2:
+                    self.sobel_edge_detection()
+                elif algorithm_number == 3:
+                    self.invert_colors()
+                elif algorithm_number == 4:
+                    self.histogram_equalization()
+                elif algorithm_number == 5:
+                    self.sharpen_image()
+                elif algorithm_number == 6:
+                    self.drawing_effect()
+            except ValueError:
+                messagebox.showerror("Error", "Invalid input. Please enter a valid number.")
+
+
+# Running the app
+if __name__ == "__main__":
+    root = tk.Tk()
+    app = ImageProcessingApp(root)
+    root.mainloop()
